@@ -1,9 +1,10 @@
 {
   "name": "repr",
   "displayName": "Repr",
-  "description": "Your resume updates itself as you work — and it's always shareable",
-  "version": "0.1.0",
+  "description": "Transform your commits into stories that showcase your work",
+  "version": "0.1.1",
   "publisher": "repr",
+  "icon": "icon.png",
   "engines": {
     "vscode": "^1.74.0"
   },
@@ -226,6 +227,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/repr/repr"
+    "url": "https://github.com/repr-app/repr-vscode"
   }
 }
