@@ -2,7 +2,11 @@
   "name": "repr",
   "displayName": "Repr",
   "description": "Transform your commits into stories that showcase your work",
-  "version": "0.1.3",
+  "version": "0.1.5",
+  "homepage": "https://repr.dev",
+  "bugs": {
+    "url": "https://github.com/repr-app/repr-vscode/issues"
+  },
   "publisher": "repr",
   "icon": "icon.png",
   "engines": {
@@ -50,6 +54,10 @@
         "title": "Repr: Install Git Hook"
       },
       {
+        "command": "repr.checkHookStatus",
+        "title": "Repr: Check Git Hook Status"
+      },
+      {
         "command": "repr.removeHook",
         "title": "Repr: Remove Git Hook"
       },
@@ -78,12 +86,8 @@
         "title": "Repr: Configure LLM"
       },
       {
-        "command": "repr.standup",
-        "title": "Repr: Standup (Last 3 Days)"
-      },
-      {
-        "command": "repr.week",
-        "title": "Repr: Week Review"
+        "command": "repr.showCommits",
+        "title": "Repr: Show Recent Commits"
       },
       {
         "command": "repr.generateLocal",
@@ -103,18 +107,11 @@
         "linux": "ctrl+shift+r"
       },
       {
-        "command": "repr.standup",
-        "key": "cmd+shift+s",
-        "mac": "cmd+shift+s",
-        "win": "ctrl+shift+s",
-        "linux": "ctrl+shift+s"
-      },
-      {
-        "command": "repr.week",
-        "key": "cmd+shift+w",
-        "mac": "cmd+shift+w",
-        "win": "ctrl+shift+w",
-        "linux": "ctrl+shift+w"
+        "command": "repr.showCommits",
+        "key": "cmd+shift+c",
+        "mac": "cmd+shift+c",
+        "win": "ctrl+shift+c",
+        "linux": "ctrl+shift+c"
       },
       {
         "command": "repr.generateLocal",
@@ -164,10 +161,7 @@
         },
         "repr.llm.provider": {
           "type": "string",
-          "enum": [
-            "cloud",
-            "local"
-          ],
+          "enum": ["cloud", "local"],
           "default": "cloud",
           "description": "LLM provider to use: cloud (repr.dev) or local endpoint"
         },
@@ -198,12 +192,7 @@
         },
         "repr.storyGeneration.template": {
           "type": "string",
-          "enum": [
-            "default",
-            "technical",
-            "business",
-            "brief"
-          ],
+          "enum": ["default", "technical", "business", "brief"],
           "default": "default",
           "description": "Story generation template style"
         },
@@ -230,12 +219,7 @@
     "eslint": "^8.57.1",
     "typescript": "^4.9.3"
   },
-  "keywords": [
-    "git",
-    "resume",
-    "profile",
-    "career"
-  ],
+  "keywords": ["git", "resume", "profile", "career"],
   "author": "Repr",
   "license": "MIT",
   "repository": {

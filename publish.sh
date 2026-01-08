@@ -63,12 +63,30 @@ echo -e "\n${YELLOW}Pushing to remote...${NC}"
 git push origin main
 git push origin "v$NEW_VERSION"
 
-echo -e "\n${GREEN}✓ Successfully published v$NEW_VERSION${NC}"
-echo -e "\nNext steps:"
-echo "1. Create a GitHub Release at: https://github.com/repr-app/repr-vscode/releases/new?tag=v$NEW_VERSION"
-echo "2. The GitHub Action will automatically publish to VS Code Marketplace and Open VSX"
-echo ""
-echo "Or publish manually now:"
-echo "  npx vsce publish"
-echo "  npx ovsx publish"
+# Create GitHub release if gh CLI is available
+if command -v gh &> /dev/null; then
+    echo -e "\n${YELLOW}Creating GitHub Release...${NC}"
+    gh release create "v$NEW_VERSION" \
+        --title "v$NEW_VERSION" \
+        --notes "Release v$NEW_VERSION" \
+        --latest \
+        "./repr-$NEW_VERSION.vsix"
+    
+    echo -e "\n${GREEN}✓ Successfully published v$NEW_VERSION${NC}"
+    echo -e "\nThe GitHub Action will automatically publish to:"
+    echo "  - VS Code Marketplace"
+    echo "  - Open VSX (Cursor)"
+else
+    echo -e "\n${GREEN}✓ Successfully published v$NEW_VERSION${NC}"
+    echo -e "\n${YELLOW}Note: GitHub CLI (gh) not found${NC}"
+    echo "Install it with: brew install gh"
+    echo ""
+    echo "Next steps:"
+    echo "1. Create a GitHub Release at: https://github.com/repr-app/repr-vscode/releases/new?tag=v$NEW_VERSION"
+    echo "2. The GitHub Action will automatically publish to VS Code Marketplace and Open VSX"
+    echo ""
+    echo "Or publish manually now:"
+    echo "  npx vsce publish"
+    echo "  npx ovsx publish"
+fi
 

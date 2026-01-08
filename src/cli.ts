@@ -76,13 +76,19 @@ export interface UserInfo {
 
 export interface CommitInfo {
     sha: string;
-    short_sha: string;
+    full_sha?: string;
+    short_sha?: string;
     message: string;
     author: string;
+    author_email?: string;
     date: string;
-    files_changed: number;
-    lines_added: number;
-    lines_removed: number;
+    files?: any[];
+    insertions?: number;
+    deletions?: number;
+    files_changed?: number;
+    lines_added?: number;
+    lines_removed?: number;
+    repo_name?: string;
     repoName?: string;
     repoPath?: string;
 }
@@ -95,16 +101,6 @@ export interface GeneratedStory {
     files_changed: number;
     lines_added: number;
     lines_removed: number;
-}
-
-export interface WorkSummary {
-    period: string;
-    repos: Array<{
-        name: string;
-        commits: number;
-        highlights: string[];
-    }>;
-    total_commits: number;
 }
 
 export interface ModeInfo {
@@ -331,6 +327,7 @@ export class ReprCLI {
     async getCommits(options: {
         repo?: string;
         limit?: number;
+        days?: number;
         since?: string;
     } = {}): Promise<CommitInfo[]> {
         try {
@@ -341,6 +338,9 @@ export class ReprCLI {
             }
             if (options.limit) {
                 args += ` --limit ${options.limit}`;
+            }
+            if (options.days) {
+                args += ` --days ${options.days}`;
             }
             if (options.since) {
                 args += ` --since "${options.since}"`;
@@ -375,40 +375,6 @@ export class ReprCLI {
         }
     }
 
-    async getStandup(): Promise<WorkSummary | null> {
-        try {
-            const { stdout } = await this.execCommand('standup --json');
-            return JSON.parse(stdout);
-        } catch (error) {
-            this.outputChannel.appendError(`Failed to get standup: ${error}`);
-            return null;
-        }
-    }
-
-    async getWeek(): Promise<WorkSummary | null> {
-        try {
-            const { stdout } = await this.execCommand('week --json');
-            return JSON.parse(stdout);
-        } catch (error) {
-            this.outputChannel.appendError(`Failed to get week summary: ${error}`);
-            return null;
-        }
-    }
-
-    async getSince(date: string, save: boolean = false): Promise<WorkSummary | null> {
-        try {
-            let args = `since "${date}" --json`;
-            if (save) {
-                args += ' --save';
-            }
-            const { stdout } = await this.execCommand(args);
-            return JSON.parse(stdout);
-        } catch (error) {
-            this.outputChannel.appendError(`Failed to get work since ${date}: ${error}`);
-            return null;
-        }
-    }
-
     async getMode(): Promise<ModeInfo | null> {
         try {
             const { stdout } = await this.execCommand('mode --json');
@@ -422,7 +388,7 @@ export class ReprCLI {
     async generate(options: {
         local?: boolean;
         template?: string;
-        since?: string;
+        days?: number;
         repo?: string;
         batchSize?: number;
     } = {}): Promise<{ generated: number; stories: GeneratedStory[] } | null> {
@@ -435,8 +401,8 @@ export class ReprCLI {
             if (options.template) {
                 args += ` --template ${options.template}`;
             }
-            if (options.since) {
-                args += ` --since "${options.since}"`;
+            if (options.days) {
+                args += ` --days ${options.days}`;
             }
             if (options.repo) {
                 args += ` --repo "${options.repo}"`;

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ReprCLI, ReprStory, ReprStatus, TrackedRepo, HookStatus, CommitInfo, WorkSummary, ModeInfo } from './cli';
+import { ReprCLI, ReprStory, ReprStatus, TrackedRepo, HookStatus, CommitInfo, ModeInfo } from './cli';
 import { ReprOutputChannel } from './outputChannel';
 
 export class ReprDashboard {
@@ -274,40 +274,163 @@ export class ReprDashboard {
     }
 
     private async handleMessage(message: any): Promise<void> {
+        this.outputChannel.appendLine(`Dashboard received message: ${message.command}`);
         switch (message.command) {
             case 'refresh':
                 await this.refresh();
                 break;
 
-            case 'loadStandup':
-                const standup = await this.cli.getStandup();
-                this.panel?.webview.postMessage({
-                    command: 'updateStandup',
-                    data: standup
-                });
+            case 'loadCommits':
+                try {
+                    this.outputChannel.appendLine(`Loading commits for last ${message.days || 3} days...`);
+                    const commits = await this.cli.getCommits({ days: message.days || 3 });
+                    this.outputChannel.appendLine(`Received ${commits ? commits.length : 'null'} commits`);
+                    
+                    if (!commits || !Array.isArray(commits)) {
+                        this.outputChannel.appendError(`Invalid commits response: ${JSON.stringify(commits)}`);
+                        this.panel?.webview.postMessage({
+                            command: 'updateCommits',
+                            data: { period: `last ${message.days || 3} days`, repos: [], total_commits: 0 }
+                        });
+                        break;
+                    }
+                    
+                    // Sort commits by date (most recent first)
+                    const sortedCommits = commits.sort((a: any, b: any) => {
+                        const dateA = new Date(a.date || a.timestamp || 0).getTime();
+                        const dateB = new Date(b.date || b.timestamp || 0).getTime();
+                        return dateB - dateA; // Reverse chronological
+                    });
+                    
+                    // Group commits by repo for display
+                    // Note: CLI returns repo_name (snake_case), not repoName (camelCase)
+                    const commitsByRepo: Record<string, any[]> = {};
+                    for (const commit of sortedCommits) {
+                        const repo = (commit as any).repo_name || commit.repoName || 'Unknown';
+                        if (!commitsByRepo[repo]) {
+                            commitsByRepo[repo] = [];
+                        }
+                        commitsByRepo[repo].push(commit);
+                    }
+                    
+                    const workSummary = {
+                        period: `last ${message.days || 3} days`,
+                        repos: Object.entries(commitsByRepo).map(([name, repoCommits]) => ({
+                            name,
+                            commits: repoCommits.length,
+                            highlights: repoCommits.slice(0, 5).map((c: any) => {
+                                const msg = (c.message || '').split('\n')[0];
+                                const date = c.date || c.timestamp;
+                                const hash = (c as any).hash || (c as any).sha || msg.substring(0, 8);
+                                return { message: msg, date, hash };
+                            })
+                        })),
+                        total_commits: sortedCommits.length
+                    };
+                    
+                    this.outputChannel.appendLine(`Sending updateCommits with ${workSummary.repos.length} repos, ${workSummary.total_commits} total commits`);
+                    this.panel?.webview.postMessage({
+                        command: 'updateCommits',
+                        data: workSummary
+                    });
+                } catch (error) {
+                    this.outputChannel.appendError(`Failed to load commits: ${error}`);
+                    // Send empty data so UI updates properly
+                    this.panel?.webview.postMessage({
+                        command: 'updateCommits',
+                        data: { period: `last ${message.days || 3} days`, repos: [], total_commits: 0 }
+                    });
+                }
                 break;
 
-            case 'loadWeek':
-                const week = await this.cli.getWeek();
-                this.panel?.webview.postMessage({
-                    command: 'updateWeek',
-                    data: week
-                });
+            case 'loadAllCommits':
+                try {
+                    this.outputChannel.appendLine(`Loading all commits for last ${message.days || 30} days...`);
+                    const allCommits = await this.cli.getCommits({ days: message.days || 30 });
+                    this.outputChannel.appendLine(`Received ${allCommits ? allCommits.length : 'null'} commits`);
+                    
+                    if (!allCommits || !Array.isArray(allCommits)) {
+                        this.panel?.webview.postMessage({
+                            command: 'updateAllCommits',
+                            data: { period: `last ${message.days || 30} days`, repos: [], total_commits: 0 }
+                        });
+                        break;
+                    }
+                    
+                    // Sort commits by date (most recent first)
+                    const sortedAllCommits = allCommits.sort((a: any, b: any) => {
+                        const dateA = new Date(a.date || a.timestamp || 0).getTime();
+                        const dateB = new Date(b.date || b.timestamp || 0).getTime();
+                        return dateB - dateA;
+                    });
+                    
+                    // Group commits by repo - NO LIMIT on commits shown
+                    const allCommitsByRepo: Record<string, any[]> = {};
+                    for (const commit of sortedAllCommits) {
+                        const repo = (commit as any).repo_name || commit.repoName || 'Unknown';
+                        if (!allCommitsByRepo[repo]) {
+                            allCommitsByRepo[repo] = [];
+                        }
+                        allCommitsByRepo[repo].push(commit);
+                    }
+                    
+                    const allWorkSummary = {
+                        period: `last ${message.days || 30} days`,
+                        repos: Object.entries(allCommitsByRepo).map(([name, repoCommits]) => ({
+                            name,
+                            commits: repoCommits.length,
+                            highlights: repoCommits.map((c: any) => {
+                                const msg = (c.message || '').split('\n')[0];
+                                const date = c.date || c.timestamp;
+                                const hash = (c as any).hash || (c as any).sha || msg.substring(0, 8);
+                                return { message: msg, date, hash };
+                            })
+                        })),
+                        total_commits: sortedAllCommits.length
+                    };
+                    
+                    this.panel?.webview.postMessage({
+                        command: 'updateAllCommits',
+                        data: allWorkSummary
+                    });
+                } catch (error) {
+                    this.outputChannel.appendError(`Failed to load all commits: ${error}`);
+                    this.panel?.webview.postMessage({
+                        command: 'updateAllCommits',
+                        data: { period: `last ${message.days || 30} days`, repos: [], total_commits: 0 }
+                    });
+                }
                 break;
 
-            case 'loadToday':
-                const today = await this.cli.getSince('this morning');
-                this.panel?.webview.postMessage({
-                    command: 'updateToday',
-                    data: today
-                });
-                break;
+            case 'generateFromCommits':
+                await vscode.window.withProgress({
+                    location: vscode.ProgressLocation.Notification,
+                    title: `Generating stories from ${message.commits?.length || 0} commits...`,
+                    cancellable: false
+                }, async () => {
+                    // For now, we'll use the standard generate with the commits
+                    // The CLI would need to support commit-specific generation
+                    // For now, fall back to days-based generation
+                    const result = await this.cli.generate({
+                        local: message.useLocal,
+                        template: message.template,
+                        // TODO: Pass specific commit hashes when CLI supports it
+                    });
 
-            case 'saveAsStory':
-                const date = message.date || 'this morning';
-                await this.cli.getSince(date, true);
-                vscode.window.showInformationMessage('Work saved as story!');
-                this.refresh();
+                    if (result && result.generated > 0) {
+                        vscode.window.showInformationMessage(
+                            `Generated ${result.generated} story(ies)!`,
+                            'View Stories'
+                        ).then(action => {
+                            if (action === 'View Stories') {
+                                this.focusStories();
+                            }
+                        });
+                        this.refresh();
+                    } else {
+                        vscode.window.showWarningMessage('No stories generated');
+                    }
+                });
                 break;
 
             case 'copyToClipboard':
@@ -316,14 +439,23 @@ export class ReprDashboard {
                 break;
 
             case 'loadStories':
-                const stories = await this.cli.getStories({
-                    limit: message.limit || 50,
-                    repo: message.repo
-                });
-                this.panel?.webview.postMessage({
-                    command: 'updateStories',
-                    stories: stories?.stories || []
-                });
+                try {
+                    const stories = await this.cli.getStories({
+                        limit: message.limit || 50,
+                        repo: message.repo
+                    });
+                    this.panel?.webview.postMessage({
+                        command: 'updateStories',
+                        stories: stories?.stories || []
+                    });
+                } catch (error) {
+                    this.outputChannel.appendError(`Failed to load stories: ${error}`);
+                    // Send empty array so UI updates properly
+                    this.panel?.webview.postMessage({
+                        command: 'updateStories',
+                        stories: []
+                    });
+                }
                 break;
 
             case 'viewStory':
@@ -352,7 +484,7 @@ export class ReprDashboard {
                     const result = await this.cli.generate({
                         local: message.useLocal,
                         template: message.template,
-                        since: message.since,
+                        days: message.days,
                         repo: message.repo,
                         batchSize: message.batchSize
                     });
@@ -442,6 +574,18 @@ export class ReprDashboard {
                         this.refresh();
                     } catch (error) {
                         vscode.window.showErrorMessage(`Failed to install hook: ${error}`);
+                    }
+                }
+                break;
+
+            case 'removeHook':
+                if (message.repo) {
+                    try {
+                        await this.cli.removeHook(message.repo);
+                        vscode.window.showInformationMessage('Hook removed successfully!');
+                        this.refresh();
+                    } catch (error) {
+                        vscode.window.showErrorMessage(`Failed to remove hook: ${error}`);
                     }
                 }
                 break;
@@ -627,14 +771,18 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
             display: flex;
             flex: 1;
             overflow: hidden;
+            min-width: 0;
+            min-height: 0;
         }
 
         .main-content {
             flex: 1;
             overflow-y: auto;
+            overflow-x: hidden;
             padding: var(--gap-lg);
-            display: flex;
-            flex-direction: column;
+            text-align: left;
+            min-width: 0;
+            min-height: 0;
         }
 
         .sidebar {
@@ -652,6 +800,7 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
             gap: 20px;
             margin-bottom: var(--gap-lg);
             border-bottom: 1px solid var(--vscode-panel-border);
+            flex-shrink: 0;
         }
 
         .tab {
@@ -677,6 +826,9 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
         .tab-content {
             display: none;
             animation: fadein 0.2s;
+            text-align: left;
+            width: 100%;
+            min-width: 0;
         }
 
         .tab-content.active {
@@ -691,6 +843,10 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
         /* --- Cards --- */
         .work-section {
             margin-bottom: 32px;
+            text-align: left;
+            width: 100%;
+            min-width: 0;
+            overflow: hidden;
         }
         
         .section-header {
@@ -698,6 +854,7 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
             justify-content: space-between;
             align-items: center;
             margin-bottom: var(--gap-md);
+            text-align: left;
         }
 
         .section-title {
@@ -726,6 +883,9 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
             padding-bottom: var(--gap-md);
             border-bottom: 1px solid var(--vscode-panel-border);
             text-align: left;
+            width: 100%;
+            min-width: 0;
+            overflow: hidden;
         }
 
         .repo-work:last-child {
@@ -747,13 +907,21 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
             padding-left: 20px;
             margin: 0;
             text-align: left;
+            width: 100%;
+            box-sizing: border-box;
         }
 
         .work-highlights li {
-            padding: 2px 0;
+            padding: 4px 0;
             font-size: 12px;
             color: var(--vscode-foreground);
             text-align: left;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            word-break: break-word;
+            white-space: normal;
+            line-height: 1.5;
+            max-width: 100%;
         }
 
         /* Compact story list (like commits) */
@@ -782,6 +950,60 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
         }
         .story-list-meta span {
             white-space: nowrap;
+        }
+
+        /* --- Commit Selection --- */
+        .commit-checkbox {
+            width: 14px;
+            height: 14px;
+            margin-right: 8px;
+            cursor: pointer;
+            accent-color: var(--vscode-focusBorder);
+            flex-shrink: 0;
+        }
+
+        .commit-item {
+            display: flex;
+            align-items: flex-start;
+            padding: 6px 0;
+        }
+
+        .commit-item label {
+            display: flex;
+            align-items: flex-start;
+            cursor: pointer;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .select-all-row {
+            display: flex;
+            align-items: center;
+            padding: 8px 0;
+            margin-bottom: 8px;
+            border-bottom: 1px solid var(--vscode-panel-border);
+            font-size: 12px;
+            color: var(--vscode-descriptionForeground);
+        }
+
+        .selection-count {
+            margin-left: auto;
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground);
+        }
+
+        .btn-generate {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+        }
+
+        .btn-generate:hover {
+            background-color: var(--vscode-button-hoverBackground);
+        }
+
+        .btn-generate:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
 
         /* --- Story Cards --- */
@@ -992,6 +1214,45 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
             color: var(--vscode-descriptionForeground);
         }
 
+        .status-muted {
+            color: var(--vscode-descriptionForeground);
+        }
+
+        .hook-btn-install,
+        .hook-btn-remove {
+            border: none;
+            border-radius: 3px;
+            padding: 2px 8px;
+            font-size: 10px;
+            font-family: inherit;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .hook-btn-install {
+            background-color: var(--vscode-button-secondaryBackground);
+            color: var(--vscode-button-secondaryForeground);
+        }
+
+        .hook-btn-install:hover {
+            background-color: var(--vscode-button-secondaryHoverBackground);
+        }
+
+        .hook-btn-remove {
+            background-color: #c42b1c;
+            color: white;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+        }
+
+        .repo-list-item:hover .hook-btn-remove {
+            opacity: 1;
+        }
+
+        .hook-btn-remove:hover {
+            background-color: #a61b0f;
+        }
+
         .empty-state {
             text-align: center;
             padding: 48px 20px;
@@ -1049,15 +1310,13 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
             </div>
 
             <div class="quick-actions">
-                <button class="btn btn-primary" onclick="sendMessage('generateStories', {useLocal: true, template: 'resume'})" title="Transform your git commits into readable stories using AI">
-                    ✨ Generate Stories
-                </button>
-                <button class="btn btn-secondary" onclick="loadStandup()" title="View raw commit activity from the last 3 days">
-                    📅 Last 3 Days
-                </button>
-                <button class="btn btn-secondary" onclick="loadWeek()" title="View raw commit activity from the last 7 days">
-                    📆 Last 7 Days
-                </button>
+                <select id="time-range-selector" onchange="loadByTimeRange(this.value)" style="margin-bottom: 0; width: auto; padding: 6px 12px; font-size: 12px;">
+                    <option value="3days" selected>Last 3 Days</option>
+                    <option value="today">Today</option>
+                    <option value="yesterday">Yesterday</option>
+                    <option value="7days">Last 7 Days</option>
+                    <option value="30days">Last 30 Days</option>
+                </select>
                 <button class="btn btn-secondary" onclick="sendMessage('syncCloud')" title="Push stories to cloud for sharing">
                     ☁️ Sync
                 </button>
@@ -1070,8 +1329,9 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
             <div class="main-content">
                 <div class="tabs">
                     <div class="tab active" data-tab="recent" onclick="switchTab('recent')">Dashboard</div>
+                    <div class="tab" data-tab="commits" onclick="switchTab('commits')">All Commits</div>
                     <div class="tab" data-tab="stories" onclick="switchTab('stories')">All Stories</div>
-                    <div class="tab" data-tab="generate" onclick="switchTab('generate')">Generate</div>
+                    <div class="tab" data-tab="generate" onclick="switchTab('generate')">Generate Stories</div>
                 </div>
 
                 <!-- Tab: Recent Stories -->
@@ -1079,7 +1339,7 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
                     <div class="work-section">
                         <div class="section-header">
                             <h3 class="section-title">Recent Stories</h3>
-                            <button class="btn btn-secondary" onclick="loadRecentStories()">Refresh</button>
+                            <button class="btn btn-secondary" onclick="copyStories()">📋 Copy</button>
                         </div>
                         <div id="recent-stories-content" class="loading">Loading stories...</div>
                     </div>
@@ -1087,13 +1347,42 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
                     <div class="work-section" style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--vscode-panel-border);">
                         <div class="section-header">
                             <h3 class="section-title">Raw Commits</h3>
-                            <div style="display: flex; gap: 8px;">
-                                <button class="btn btn-secondary" onclick="loadStandup()">📅 3 Days</button>
-                                <button class="btn btn-secondary" onclick="loadWeek()">📆 7 Days</button>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <span id="dashboard-selection-count" class="selection-count" style="display: none;"></span>
+                                <button class="btn btn-generate" id="dashboard-generate-btn" style="display: none;" onclick="generateFromSelectedCommits('dashboard')">
+                                    🪄 Generate Stories
+                                </button>
+                                <button class="btn btn-secondary" onclick="copyCommits()">📋 Copy</button>
                             </div>
                         </div>
-                        <div id="raw-activity-content" class="empty-state">Click a button above to view raw commit activity</div>
+                        <div id="raw-activity-content" class="loading">Loading commits...</div>
                     </div>
+                </div>
+
+                <!-- Tab: All Commits -->
+                <div class="tab-content" id="tab-commits">
+                    <div class="section-header" style="margin-bottom: 16px;">
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <select id="commits-time-range" onchange="loadAllCommits(this.value)" style="margin-bottom: 0; width: auto;">
+                                <option value="7">Last 7 Days</option>
+                                <option value="14">Last 14 Days</option>
+                                <option value="30" selected>Last 30 Days</option>
+                                <option value="90">Last 90 Days</option>
+                            </select>
+                            <select id="commits-repo-filter" onchange="filterCommitsByRepo(this.value)" style="margin-bottom: 0; width: 200px;">
+                                <option value="">All Repositories</option>
+                                ${trackedRepos.map(r => `<option value="${this.escapeHtml(r.name)}">${this.escapeHtml(r.name)}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <span id="commits-selection-count" class="selection-count" style="display: none;"></span>
+                            <button class="btn btn-generate" id="commits-generate-btn" style="display: none;" onclick="generateFromSelectedCommits('commits')">
+                                🪄 Generate Stories
+                            </button>
+                            <button class="btn btn-secondary" onclick="copyAllCommits()">📋 Copy</button>
+                        </div>
+                    </div>
+                    <div id="all-commits-content" class="loading">Loading commits...</div>
                 </div>
 
                 <!-- Tab: Stories -->
@@ -1113,14 +1402,20 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
                 <div class="tab-content" id="tab-generate">
                     <div class="wizard-step">
                         <h4>1. Source Selection</h4>
-                        <select id="gen-source">
-                            <option value="week">From Last Week</option>
-                            <option value="standup">From Last 3 Days</option>
-                            <option value="today">From Today</option>
-                            <option value="custom">Custom Date Range</option>
+                        <select id="gen-source" onchange="onSourceChange(this.value)">
+                            <option value="selected" id="gen-source-selected" disabled>Selected Commits (0 selected)</option>
+                            <option value="3" selected>Last 3 Days</option>
+                            <option value="7">Last 7 Days (Week)</option>
+                            <option value="14">Last 14 Days (Sprint)</option>
+                            <option value="30">Last 30 Days</option>
+                            <option value="custom">Custom Days</option>
                         </select>
                         <div id="gen-source-custom" style="display: none; margin-top: 8px;">
-                            <input type="text" id="gen-since" placeholder="e.g., '2 weeks ago', 'Jan 1'">
+                            <input type="number" id="gen-days" placeholder="Enter number of days" min="1" value="7">
+                        </div>
+                        <div id="gen-selected-info" style="display: none; margin-top: 8px; padding: 8px 12px; background: var(--vscode-textBlockQuote-background); border-radius: 4px; font-size: 12px;">
+                            <span id="gen-selected-summary"></span>
+                            <button class="btn btn-secondary" style="margin-left: 8px; padding: 2px 8px; font-size: 11px;" onclick="switchTab('commits')">Edit Selection</button>
                         </div>
                     </div>
 
@@ -1181,13 +1476,15 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
                 <div class="sidebar-section">
                     <h3>Tracked Repositories</h3>
                     ${trackedRepos.length > 0 ? trackedRepos.map((repo, index) => {
-                        const hook = hookStatus.find(h => h.path === repo.path);
                         const repoName = repo.name || repo.path.split('/').pop() || 'Unknown';
-                        const hasHook = hook?.installed;
+                        const hasHook = repo.hook_installed;
                         return `
-                            <div class="repo-list-item ${hasHook ? '' : 'clickable'}" data-repo-index="${index}" data-has-hook="${hasHook ? 'true' : 'false'}" title="${hasHook ? 'Hook installed' : 'Click to install hook'}">
+                            <div class="repo-list-item" data-repo-index="${index}" data-has-hook="${hasHook ? 'true' : 'false'}">
                                 <span class="repo-name">${this.escapeHtml(repoName)}</span>
-                                <span class="repo-status ${hasHook ? 'status-active' : 'status-inactive'}">${hasHook ? '✓ Hook' : '+ Install hook'}</span>
+                                ${hasHook 
+                                    ? `<span class="repo-status status-muted">Hook installed</span><button class="hook-btn-remove" data-action="remove">× remove</button>`
+                                    : `<button class="hook-btn-install" data-action="install">install hook</button>`
+                                }
                             </div>
                         `;
                     }).join('') : '<div style="font-size: 12px; color: var(--vscode-descriptionForeground); font-style: italic;">No repos tracked</div>'}
@@ -1212,30 +1509,184 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
     <script>
         var vscode = acquireVsCodeApi();
         var selectedTemplate = 'resume';
+        
+        // Commit selection state
+        var selectedCommits = {
+            dashboard: new Set(),
+            commits: new Set()
+        };
+        var allCommitsData = {
+            dashboard: [],
+            commits: []
+        };
 
         function sendMessage(command, data) {
             data = data || {};
             vscode.postMessage(Object.assign({ command: command }, data));
         }
 
+        // Commit selection functions
+        function getCommitKey(repo, hash) {
+            return repo + '::' + hash;
+        }
+
+        function toggleCommitSelection(context, repo, hash, message) {
+            var key = getCommitKey(repo, hash);
+            if (selectedCommits[context].has(key)) {
+                selectedCommits[context].delete(key);
+            } else {
+                selectedCommits[context].add(key);
+            }
+            updateSelectionUI(context);
+            updateGenerateSourceOption();
+        }
+
+        function toggleSelectAll(context, checked) {
+            var commits = allCommitsData[context] || [];
+            if (checked) {
+                commits.forEach(function(c) {
+                    var key = getCommitKey(c.repo, c.hash);
+                    selectedCommits[context].add(key);
+                });
+            } else {
+                selectedCommits[context].clear();
+            }
+            
+            // Update checkboxes
+            var checkboxes = document.querySelectorAll('#' + (context === 'dashboard' ? 'raw-activity-content' : 'all-commits-content') + ' .commit-checkbox');
+            checkboxes.forEach(function(cb) {
+                cb.checked = checked;
+            });
+            
+            updateSelectionUI(context);
+            updateGenerateSourceOption();
+        }
+
+        function updateSelectionUI(context) {
+            var count = selectedCommits[context].size;
+            var countEl = document.getElementById(context + '-selection-count');
+            var btnEl = document.getElementById(context + '-generate-btn');
+            
+            if (countEl && btnEl) {
+                if (count > 0) {
+                    countEl.textContent = count + ' selected';
+                    countEl.style.display = 'inline';
+                    btnEl.style.display = 'inline-flex';
+                } else {
+                    countEl.style.display = 'none';
+                    btnEl.style.display = 'none';
+                }
+            }
+            
+            // Update select all checkbox
+            var selectAllEl = document.getElementById(context + '-select-all');
+            if (selectAllEl) {
+                var total = (allCommitsData[context] || []).length;
+                selectAllEl.checked = count > 0 && count === total;
+                selectAllEl.indeterminate = count > 0 && count < total;
+            }
+        }
+
+        function updateGenerateSourceOption() {
+            var totalSelected = selectedCommits.dashboard.size + selectedCommits.commits.size;
+            var optionEl = document.getElementById('gen-source-selected');
+            var sourceEl = document.getElementById('gen-source');
+            var infoEl = document.getElementById('gen-selected-info');
+            var summaryEl = document.getElementById('gen-selected-summary');
+            
+            if (optionEl) {
+                if (totalSelected > 0) {
+                    optionEl.disabled = false;
+                    optionEl.textContent = 'Selected Commits (' + totalSelected + ' selected)';
+                } else {
+                    optionEl.disabled = true;
+                    optionEl.textContent = 'Selected Commits (0 selected)';
+                    // If currently selected, switch to default
+                    if (sourceEl && sourceEl.value === 'selected') {
+                        sourceEl.value = '3';
+                        onSourceChange('3');
+                    }
+                }
+            }
+        }
+
+        function onSourceChange(value) {
+            var customEl = document.getElementById('gen-source-custom');
+            var infoEl = document.getElementById('gen-selected-info');
+            var summaryEl = document.getElementById('gen-selected-summary');
+            
+            if (customEl) {
+                customEl.style.display = value === 'custom' ? 'block' : 'none';
+            }
+            
+            if (infoEl && summaryEl) {
+                if (value === 'selected') {
+                    var total = selectedCommits.dashboard.size + selectedCommits.commits.size;
+                    summaryEl.textContent = total + ' commits selected for story generation';
+                    infoEl.style.display = 'block';
+                } else {
+                    infoEl.style.display = 'none';
+                }
+            }
+        }
+
+        function generateFromSelectedCommits(context) {
+            var commits = [];
+            selectedCommits[context].forEach(function(key) {
+                var parts = key.split('::');
+                commits.push({ repo: parts[0], hash: parts[1] });
+            });
+            
+            if (commits.length === 0) {
+                return;
+            }
+            
+            sendMessage('generateFromCommits', {
+                commits: commits,
+                useLocal: true,
+                template: selectedTemplate
+            });
+        }
+
+        function getSelectedCommitsForGeneration() {
+            var commits = [];
+            // Combine from both contexts
+            ['dashboard', 'commits'].forEach(function(ctx) {
+                selectedCommits[ctx].forEach(function(key) {
+                    var parts = key.split('::');
+                    commits.push({ repo: parts[0], hash: parts[1] });
+                });
+            });
+            return commits;
+        }
+
         function installHook(repoPath) {
             sendMessage('installHook', { repo: repoPath });
         }
 
-        // Event delegation for repo hook installation
+        function removeHook(repoPath) {
+            sendMessage('removeHook', { repo: repoPath });
+        }
+
+        // Event delegation for repo hook install/remove
         document.addEventListener('click', function(e) {
             var target = e.target;
-            while (target && target !== document) {
-                if (target.classList && target.classList.contains('repo-list-item')) {
-                    if (target.getAttribute('data-has-hook') === 'false') {
-                        var index = parseInt(target.getAttribute('data-repo-index'), 10);
-                        if (typeof repoPaths !== 'undefined' && repoPaths[index]) {
+            
+            // Check if clicked on hook button
+            if (target.classList && (target.classList.contains('hook-btn-install') || target.classList.contains('hook-btn-remove'))) {
+                var repoItem = target.closest('.repo-list-item');
+                if (repoItem) {
+                    var index = parseInt(repoItem.getAttribute('data-repo-index'), 10);
+                    var action = target.getAttribute('data-action');
+                    if (typeof repoPaths !== 'undefined' && repoPaths[index]) {
+                        if (action === 'install') {
                             installHook(repoPaths[index]);
+                        } else if (action === 'remove') {
+                            removeHook(repoPaths[index]);
                         }
                     }
-                    return;
                 }
-                target = target.parentElement;
+                return;
             }
         });
 
@@ -1248,77 +1699,408 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
 
             if (tabName === 'stories') {
                 sendMessage('loadStories', { limit: 50 });
+            } else if (tabName === 'commits') {
+                var days = parseInt(document.getElementById('commits-time-range').value, 10) || 30;
+                loadAllCommits(days);
             }
+        }
+
+        function loadAllCommits(days) {
+            var container = document.getElementById('all-commits-content');
+            if (container) {
+                container.innerHTML = '<div class="loading">Loading commits...</div>';
+            }
+            sendMessage('loadAllCommits', { days: parseInt(days, 10) || 30 });
+        }
+
+        function filterCommitsByRepo(repoName) {
+            var container = document.getElementById('all-commits-content');
+            if (!container) return;
+            
+            var repoSections = container.querySelectorAll('.repo-work');
+            repoSections.forEach(function(section) {
+                var titleEl = section.querySelector('.repo-work-title');
+                if (titleEl) {
+                    var sectionRepo = titleEl.textContent.split(' (')[0].trim();
+                    section.style.display = (!repoName || sectionRepo === repoName) ? 'block' : 'none';
+                }
+            });
+        }
+
+        function copyAllCommits() {
+            if (!window.allCommitsFullData) {
+                sendMessage('copyToClipboard', { text: 'No commits to copy' });
+                return;
+            }
+            sendMessage('copyToClipboard', { text: formatWorkForClipboard(window.allCommitsFullData) });
         }
 
         function loadRecentStories() {
+            var container = document.getElementById('recent-stories-content');
+            if (container) {
+                container.innerHTML = '<div class="loading">Loading stories...</div>';
+            }
+            
+            // Set a timeout to show error if loading takes too long
+            var loadTimeout = setTimeout(function() {
+                if (container && container.innerHTML.includes('Loading stories')) {
+                    container.innerHTML = '<div class="empty-state">Taking longer than expected... <button class="btn btn-secondary" onclick="loadRecentStories()">Retry</button></div>';
+                }
+            }, 5000);
+            
             sendMessage('loadStories', { limit: 10 });
         }
 
-        function loadToday() {
-            sendMessage('loadToday');
+        function loadCommits(days) {
+            var container = document.getElementById('raw-activity-content');
+            if (container) {
+                container.innerHTML = '<div class="loading">Loading commits...</div>';
+            }
+            
+            // Set a timeout to show error if loading takes too long
+            var loadTimeout = setTimeout(function() {
+                if (container && container.innerHTML.includes('Loading commits')) {
+                    container.innerHTML = '<div class="empty-state">Taking longer than expected... <button class="btn btn-secondary" onclick="loadCommits(' + days + ')">Retry</button></div>';
+                }
+            }, 5000);
+            
+            sendMessage('loadCommits', { days: days });
         }
 
-        function loadStandup() {
-            sendMessage('loadStandup');
+        // Master time range function - controls both stories and commits
+        function loadByTimeRange(range) {
+            if (!range) return;
+            
+            // Map range to days
+            var daysMap = {
+                'today': 1,
+                'yesterday': 2,
+                '3days': 3,
+                '7days': 7,
+                '30days': 30
+            };
+            
+            var days = daysMap[range] || 3;
+            loadCommits(days);
+            
+            // Also load stories
+            loadRecentStories();
         }
 
-        function loadWeek() {
-            sendMessage('loadWeek');
-        }
+        // Store data for copy functionality
+        window.currentStoriesData = null;
+        window.currentCommitsData = null;
 
-        function renderRecentStories(stories) {
-            var container = document.getElementById('recent-stories-content');
-            if (!stories || stories.length === 0) {
-                container.innerHTML = '<div class="empty-state">No stories yet. Click "Generate Stories" to create your first one!</div>';
+        function copyStories() {
+            if (!window.currentStoriesData || window.currentStoriesData.length === 0) {
+                sendMessage('copyToClipboard', { text: 'No stories to copy' });
                 return;
             }
 
-            var html = '';
-            stories.slice(0, 15).forEach(function(story) {
-                // Clean markdown ** from summary
-                var title = (story.summary || '').split('**').join('');
-                html += '<div class="story-list-item" onclick="viewStory(&apos;' + story.id + '&apos;)">';
-                html += '<div class="story-list-title">' + escapeHtml(title) + '</div>';
-                html += '<div class="story-list-meta">';
-                html += '<span>' + escapeHtml(story.repo_name || '') + '</span>';
-                html += '<span>' + (story.files_changed || 0) + ' files</span>';
-                html += '<span>+' + (story.lines_added || 0) + ' -' + (story.lines_removed || 0) + '</span>';
-                html += '<span>' + new Date(story.last_commit_at).toLocaleDateString() + '</span>';
-                html += '</div>';
-                html += '</div>';
+            var text = 'Recent Stories\\n\\n';
+            var storiesByRepo = {};
+            
+            window.currentStoriesData.forEach(function(story) {
+                var repoName = story.repo_name || 'Unknown';
+                if (!storiesByRepo[repoName]) {
+                    storiesByRepo[repoName] = [];
+                }
+                storiesByRepo[repoName].push(story);
             });
-            container.innerHTML = html;
+
+            Object.keys(storiesByRepo).forEach(function(repoName) {
+                var repoStories = storiesByRepo[repoName];
+                text += repoName + ' (' + repoStories.length + ' stories):\\n';
+                repoStories.forEach(function(story) {
+                    var summary = (story.summary || '').split('**').join('');
+                    text += '  • ' + summary + '\\n';
+                });
+                text += '\\n';
+            });
+
+            sendMessage('copyToClipboard', { text: text });
         }
 
-        function renderWorkSummary(data, containerId) {
+        function copyCommits() {
+            if (!window.currentCommitsData) {
+                sendMessage('copyToClipboard', { text: 'No commits to copy' });
+                return;
+            }
+            sendMessage('copyToClipboard', { text: formatWorkForClipboard(window.currentCommitsData) });
+        }
+
+        function renderRecentStories(stories) {
+            console.log('renderRecentStories called with', stories ? stories.length : 0, 'stories');
+            var container = document.getElementById('recent-stories-content');
+            if (!container) {
+                console.error('recent-stories-content container not found');
+                return;
+            }
+            
+            // Store for copy functionality
+            window.currentStoriesData = stories;
+            
+            if (!stories || stories.length === 0) {
+                container.innerHTML = '<div class="empty-state">No stories yet. Go to Generate Stories tab to create your first one!</div>';
+                return;
+            }
+
+            // Sort stories by date (most recent first)
+            var sortedStories = stories.slice().sort(function(a, b) {
+                var dateA = new Date(a.last_commit_at || a.created_at || 0).getTime();
+                var dateB = new Date(b.last_commit_at || b.created_at || 0).getTime();
+                return dateB - dateA; // Reverse chronological
+            });
+
+            console.log('Sorted stories:', sortedStories.slice(0, 5).map(function(s) {
+                return { summary: s.summary.substring(0, 50), date: s.last_commit_at || s.created_at };
+            }));
+
+            // Group stories by repository (preserving order)
+            var storiesByRepo = {};
+            var repoOrder = [];
+            sortedStories.slice(0, 15).forEach(function(story) {
+                var repoName = story.repo_name || 'Unknown';
+                if (!storiesByRepo[repoName]) {
+                    storiesByRepo[repoName] = [];
+                    repoOrder.push(repoName);
+                }
+                storiesByRepo[repoName].push(story);
+            });
+
+            // Render stories grouped by repo (in order of first appearance)
+            var html = '';
+            repoOrder.forEach(function(repoName) {
+                var repoStories = storiesByRepo[repoName];
+                var totalStories = repoStories.length;
+                
+                html += '<div class="repo-work">';
+                html += '<div class="repo-work-title">' + escapeHtml(repoName) + ' <span style="font-weight:normal; opacity:0.7; font-size:11px;">(' + totalStories + ' ' + (totalStories === 1 ? 'story' : 'stories') + ')</span></div>';
+                html += '<ul class="work-highlights">';
+                
+                repoStories.forEach(function(story) {
+                    // Clean markdown ** from summary
+                    var summary = (story.summary || '').split('**').join('');
+                    
+                    // Format date
+                    var dateStr = '';
+                    if (story.last_commit_at) {
+                        var date = new Date(story.last_commit_at);
+                        if (!isNaN(date.getTime())) {
+                            dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        }
+                    } else if (story.created_at) {
+                        // Fallback to created_at if available (some versions might return it)
+                        var date = new Date(story.created_at);
+                        if (!isNaN(date.getTime())) {
+                            dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        }
+                    }
+
+                    html += '<li>';
+                    html += '<div style="display:flex; justify-content:space-between; gap:8px;">';
+                    html += '<span>' + escapeHtml(summary) + '</span>';
+                    
+                    if (dateStr) {
+                        html += '<span style="color: var(--vscode-descriptionForeground); font-size: 11px; white-space: nowrap; flex-shrink: 0;">' + dateStr + '</span>';
+                    }
+                    
+                    html += '</div>';
+                    html += '</li>';
+                });
+                
+                html += '</ul></div>';
+            });
+            
+            container.innerHTML = html;
+            console.log('Recent stories rendered successfully');
+        }
+
+        function renderWorkSummary(data, containerId, context) {
+            context = context || 'dashboard';
+            console.log('renderWorkSummary called with containerId:', containerId, 'context:', context);
             var container = document.getElementById(containerId);
+            console.log('Container found:', container ? 'yes' : 'no', container);
+            
+            if (!container) {
+                console.error('Container not found:', containerId);
+                return;
+            }
+            
+            // Store for copy functionality
+            window.currentCommitsData = data;
+            
+            // Clear and rebuild commit data for selection
+            allCommitsData[context] = [];
+            
             if (!data || !data.repos || data.repos.length === 0) {
                 container.innerHTML = '<div class="empty-state">No activity found for this period</div>';
                 return;
             }
 
-            var html = '';
+            // Build flat list of commits for selection tracking
             data.repos.forEach(function(repo) {
-                html += '<div class="repo-work">';
-                html += '<div class="repo-work-title">' + repo.name + ' <span style="font-weight:normal; opacity:0.7; font-size:11px;">(' + repo.commits + ' commits)</span></div>';
-                html += '<ul class="work-highlights">';
-                repo.highlights.forEach(function(h) {
-                    html += '<li>' + h + '</li>';
+                (repo.highlights || []).forEach(function(h) {
+                    var hash = typeof h === 'object' ? (h.hash || h.message.substring(0, 8)) : h.substring(0, 8);
+                    var message = typeof h === 'string' ? h : h.message;
+                    allCommitsData[context].push({
+                        repo: repo.name,
+                        hash: hash,
+                        message: message,
+                        date: typeof h === 'object' ? h.date : null
+                    });
                 });
-                html += '</ul></div>';
             });
-            html += '<div style="margin-top: 16px; display: flex; gap: 8px;">';
-            html += '<button class="btn btn-secondary" onclick="copyWork()">📋 Copy</button>';
-            html += '<button class="btn btn-primary" onclick="generateFromActivity()">✨ Generate Stories</button>';
+
+            var html = '';
+            
+            // Add select all row
+            var totalCommits = allCommitsData[context].length;
+            html += '<div class="select-all-row">';
+            html += '<label style="display:flex; align-items:center; cursor:pointer;">';
+            html += '<input type="checkbox" id="' + context + '-select-all" class="commit-checkbox" onchange="toggleSelectAll(\\'' + context + '\\', this.checked)" />';
+            html += '<span>Select all (' + totalCommits + ' commits)</span>';
+            html += '</label>';
             html += '</div>';
+            
+            data.repos.forEach(function(repo) {
+                var highlights = repo.highlights.slice(0, 5);
+                var repoTotalCommits = repo.commits;
+                
+                html += '<div class="repo-work">';
+                html += '<div class="repo-work-title">' + escapeHtml(repo.name) + ' <span style="font-weight:normal; opacity:0.7; font-size:11px;">(' + repoTotalCommits + ' commits)</span></div>';
+                html += '<div class="work-highlights" style="list-style:none; padding-left:0;">';
+                highlights.forEach(function(h) {
+                    var message = typeof h === 'string' ? h : h.message;
+                    var hash = typeof h === 'object' ? (h.hash || message.substring(0, 8)) : message.substring(0, 8);
+                    var dateStr = '';
+                    var key = getCommitKey(repo.name, hash);
+                    var isSelected = selectedCommits[context].has(key);
+                    
+                    if (typeof h === 'object' && h.date) {
+                        var date = new Date(h.date);
+                        if (!isNaN(date.getTime())) {
+                            dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        }
+                    }
+                    
+                    html += '<div class="commit-item">';
+                    html += '<label style="display:flex; align-items:flex-start; flex:1; cursor:pointer; gap:8px;">';
+                    html += '<input type="checkbox" class="commit-checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="toggleCommitSelection(\\'' + context + '\\', \\'' + escapeHtml(repo.name).replace(/'/g, "\\'") + '\\', \\'' + escapeHtml(hash).replace(/'/g, "\\'") + '\\', \\'' + escapeHtml(message).replace(/'/g, "\\'") + '\\')" />';
+                    html += '<div style="flex:1; display:flex; justify-content:space-between; gap:8px; min-width:0;">';
+                    html += '<span style="word-break:break-word;">' + escapeHtml(message) + '</span>';
+                    
+                    if (dateStr) {
+                        html += '<span style="color: var(--vscode-descriptionForeground); font-size: 11px; white-space: nowrap; flex-shrink: 0;">' + dateStr + '</span>';
+                    }
+                    
+                    html += '</div>';
+                    html += '</label>';
+                    html += '</div>';
+                });
+                html += '</div></div>';
+            });
+            console.log('Setting innerHTML, html length:', html.length);
             container.innerHTML = html;
-            window.currentWorkData = data;
+            container.classList.remove('loading');
+            console.log('innerHTML set, container now has', container.children.length, 'children');
+            
+            // Update selection UI
+            updateSelectionUI(context);
+        }
+
+        function renderAllCommits(data, containerId, context) {
+            context = context || 'commits';
+            console.log('renderAllCommits called with containerId:', containerId);
+            var container = document.getElementById(containerId);
+            
+            if (!container) {
+                console.error('Container not found:', containerId);
+                return;
+            }
+            
+            // Clear and rebuild commit data for selection
+            allCommitsData[context] = [];
+            
+            if (!data || !data.repos || data.repos.length === 0) {
+                container.innerHTML = '<div class="empty-state">No commits found for this period</div>';
+                return;
+            }
+
+            // Build flat list of ALL commits for selection tracking (not limited)
+            data.repos.forEach(function(repo) {
+                (repo.highlights || []).forEach(function(h) {
+                    var hash = typeof h === 'object' ? (h.hash || h.message.substring(0, 8)) : h.substring(0, 8);
+                    var message = typeof h === 'string' ? h : h.message;
+                    allCommitsData[context].push({
+                        repo: repo.name,
+                        hash: hash,
+                        message: message,
+                        date: typeof h === 'object' ? h.date : null
+                    });
+                });
+            });
+
+            var html = '';
+            
+            // Add select all row
+            var totalCommits = allCommitsData[context].length;
+            html += '<div class="select-all-row">';
+            html += '<label style="display:flex; align-items:center; cursor:pointer;">';
+            html += '<input type="checkbox" id="' + context + '-select-all" class="commit-checkbox" onchange="toggleSelectAll(\\'' + context + '\\', this.checked)" />';
+            html += '<span>Select all (' + totalCommits + ' commits)</span>';
+            html += '</label>';
+            html += '</div>';
+            
+            data.repos.forEach(function(repo) {
+                // Show ALL commits for the All Commits tab (no limit)
+                var highlights = repo.highlights || [];
+                var repoTotalCommits = repo.commits;
+                
+                html += '<div class="repo-work">';
+                html += '<div class="repo-work-title">' + escapeHtml(repo.name) + ' <span style="font-weight:normal; opacity:0.7; font-size:11px;">(' + repoTotalCommits + ' commits)</span></div>';
+                html += '<div class="work-highlights" style="list-style:none; padding-left:0;">';
+                highlights.forEach(function(h) {
+                    var message = typeof h === 'string' ? h : h.message;
+                    var hash = typeof h === 'object' ? (h.hash || message.substring(0, 8)) : message.substring(0, 8);
+                    var dateStr = '';
+                    var key = getCommitKey(repo.name, hash);
+                    var isSelected = selectedCommits[context].has(key);
+                    
+                    if (typeof h === 'object' && h.date) {
+                        var date = new Date(h.date);
+                        if (!isNaN(date.getTime())) {
+                            dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        }
+                    }
+                    
+                    html += '<div class="commit-item">';
+                    html += '<label style="display:flex; align-items:flex-start; flex:1; cursor:pointer; gap:8px;">';
+                    html += '<input type="checkbox" class="commit-checkbox" ' + (isSelected ? 'checked' : '') + ' onchange="toggleCommitSelection(\\'' + context + '\\', \\'' + escapeHtml(repo.name).replace(/'/g, "\\'") + '\\', \\'' + escapeHtml(hash).replace(/'/g, "\\'") + '\\', \\'' + escapeHtml(message).replace(/'/g, "\\'") + '\\')" />';
+                    html += '<div style="flex:1; display:flex; justify-content:space-between; gap:8px; min-width:0;">';
+                    html += '<span style="word-break:break-word;">' + escapeHtml(message) + '</span>';
+                    
+                    if (dateStr) {
+                        html += '<span style="color: var(--vscode-descriptionForeground); font-size: 11px; white-space: nowrap; flex-shrink: 0;">' + dateStr + '</span>';
+                    }
+                    
+                    html += '</div>';
+                    html += '</label>';
+                    html += '</div>';
+                });
+                html += '</div></div>';
+            });
+            
+            container.innerHTML = html;
+            container.classList.remove('loading');
+            
+            // Update selection UI
+            updateSelectionUI(context);
         }
 
         function generateFromActivity() {
-            if (window.currentWorkData) {
-                sendMessage('generateStories', { useLocal: true, template: 'resume', since: window.currentWorkData.period || '3 days ago' });
+            if (window.currentCommitsData) {
+                sendMessage('generateStories', { useLocal: true, template: 'resume', days: 3 });
             }
         }
 
@@ -1361,32 +2143,45 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
         function runGeneration() {
             var source = document.getElementById('gen-source').value;
             var llm = document.getElementById('gen-llm').value;
-            var since = source === 'custom' ? document.getElementById('gen-since').value :
-                         source === 'week' ? '1 week ago' :
-                         source === 'standup' ? '3 days ago' :
-                         'this morning';
-
-            sendMessage('generateStories', {
-                useLocal: llm === 'local',
-                template: selectedTemplate,
-                since: since
-            });
+            
+            if (source === 'selected') {
+                // Generate from selected commits
+                var commits = getSelectedCommitsForGeneration();
+                if (commits.length === 0) {
+                    return;
+                }
+                sendMessage('generateFromCommits', {
+                    commits: commits,
+                    useLocal: llm === 'local',
+                    template: selectedTemplate
+                });
+            } else {
+                var days = source === 'custom' ? parseInt(document.getElementById('gen-days').value, 10) : parseInt(source, 10);
+                sendMessage('generateStories', {
+                    useLocal: llm === 'local',
+                    template: selectedTemplate,
+                    days: days
+                });
+            }
         }
 
         window.addEventListener('message', function(event) {
             var message = event.data;
+            console.log('Received message:', message.command, message);
 
             switch (message.command) {
-                case 'updateToday':
-                    renderWorkSummary(message.data, 'raw-activity-content');
+                case 'updateCommits':
+                    console.log('updateCommits received, data:', message.data);
+                    console.log('repos count:', message.data ? message.data.repos ? message.data.repos.length : 'no repos' : 'no data');
+                    renderWorkSummary(message.data, 'raw-activity-content', 'dashboard');
                     break;
-                case 'updateStandup':
-                    renderWorkSummary(message.data, 'raw-activity-content');
-                    break;
-                case 'updateWeek':
-                    renderWorkSummary(message.data, 'raw-activity-content');
+                case 'updateAllCommits':
+                    console.log('updateAllCommits received, data:', message.data);
+                    window.allCommitsFullData = message.data;
+                    renderAllCommits(message.data, 'all-commits-content', 'commits');
                     break;
                 case 'updateStories':
+                    console.log('updateStories received with', message.stories ? message.stories.length : 0, 'stories');
                     renderStories(message.stories);
                     renderRecentStories(message.stories);
                     break;
@@ -1403,23 +2198,67 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
                 return;
             }
 
-            var html = '';
-            stories.forEach(function(story) {
-                // Clean markdown ** from summary
-                var title = (story.summary || '').split('**').join('');
-                html += '<div class="story-list-item" onclick="viewStory(&apos;' + story.id + '&apos;)">';
-                html += '<div class="story-list-title">' + escapeHtml(title) + '</div>';
-                html += '<div class="story-list-meta">';
-                html += '<span>' + escapeHtml(story.repo_name || '') + '</span>';
-                html += '<span>' + (story.files_changed || 0) + ' files</span>';
-                html += '<span>+' + (story.lines_added || 0) + ' -' + (story.lines_removed || 0) + '</span>';
-                html += '<span>' + new Date(story.last_commit_at).toLocaleDateString() + '</span>';
-                if (story.is_featured) {
-                    html += '<span style="color: #ffc107;">★</span>';
-                }
-                html += '</div>';
-                html += '</div>';
+            // Sort stories by date (most recent first)
+            var sortedStories = stories.slice().sort(function(a, b) {
+                var dateA = new Date(a.last_commit_at || a.created_at || 0).getTime();
+                var dateB = new Date(b.last_commit_at || b.created_at || 0).getTime();
+                return dateB - dateA; // Reverse chronological
             });
+
+            // Group stories by repository (preserving order)
+            var storiesByRepo = {};
+            var repoOrder = [];
+            sortedStories.forEach(function(story) {
+                var repoName = story.repo_name || 'Unknown';
+                if (!storiesByRepo[repoName]) {
+                    storiesByRepo[repoName] = [];
+                    repoOrder.push(repoName);
+                }
+                storiesByRepo[repoName].push(story);
+            });
+
+            // Render stories grouped by repo (in order of first appearance)
+            var html = '';
+            repoOrder.forEach(function(repoName) {
+                var repoStories = storiesByRepo[repoName];
+                var totalStories = repoStories.length;
+                
+                html += '<div class="repo-work">';
+                html += '<div class="repo-work-title">' + escapeHtml(repoName) + ' <span style="font-weight:normal; opacity:0.7; font-size:11px;">(' + totalStories + ' ' + (totalStories === 1 ? 'story' : 'stories') + ')</span></div>';
+                html += '<ul class="work-highlights">';
+                
+                repoStories.forEach(function(story) {
+                    // Clean markdown ** from summary
+                    var summary = (story.summary || '').split('**').join('');
+                    
+                    // Format date
+                    var dateStr = '';
+                    if (story.last_commit_at) {
+                        var date = new Date(story.last_commit_at);
+                        if (!isNaN(date.getTime())) {
+                            dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                        }
+                    }
+
+                    html += '<li>';
+                    html += '<div style="display:flex; justify-content:space-between; gap:8px;">';
+                    html += '<span>' + escapeHtml(summary);
+                    if (story.is_featured) {
+                        html += ' <span style="color: #ffc107;">★</span>';
+                    }
+                    html += '</span>';
+                    
+                    if (dateStr) {
+                        html += '<span style="color: var(--vscode-descriptionForeground); font-size: 11px; white-space: nowrap; flex-shrink: 0;">' + dateStr + '</span>';
+                    }
+                    
+                    html += '</div>';
+                    html += '</li>';
+                });
+                
+                html += '</ul></div>';
+            });
+            
             container.innerHTML = html;
         }
 
@@ -1434,14 +2273,24 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
             return div.innerHTML;
         }
 
-        setTimeout(function() {
+        // Initialize dashboard immediately
+        (function initDashboard() {
             try {
                 console.log('Dashboard loaded, initializing...');
-                loadRecentStories();
+                // Small delay to ensure vscode API is ready
+                setTimeout(function() {
+                    // Load with default time range (3 days) - this loads both stories and commits
+                    loadByTimeRange('3days');
+                }, 100);
             } catch (error) {
                 console.error('Error during dashboard initialization:', error);
+                // Show error in UI if initialization fails
+                var container = document.getElementById('recent-stories-content');
+                if (container) {
+                    container.innerHTML = '<div class="empty-state">Failed to initialize: ' + error + '</div>';
+                }
             }
-        }, 500);
+        })();
 
         window.onerror = function(message, source, lineno, colno, error) {
             console.error('Dashboard error:', { message: message, source: source, lineno: lineno, colno: colno, error: error });

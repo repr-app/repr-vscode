@@ -82,6 +82,12 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
+        vscode.commands.registerCommand('repr.checkHookStatus', async () => {
+            await handleCheckHookStatus();
+        })
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand('repr.removeHook', async () => {
             await handleRemoveHook();
         })
@@ -124,14 +130,8 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('repr.standup', async () => {
-            await handleStandup();
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('repr.week', async () => {
-            await handleWeek();
+        vscode.commands.registerCommand('repr.showCommits', async () => {
+            await handleShowCommits();
         })
     );
 
@@ -250,12 +250,99 @@ async function handleAddCurrentRepo() {
     }
 }
 
+async function handleCheckHookStatus() {
+    const trackedRepos = await cli.getTrackedRepos();
+    
+    if (trackedRepos.length === 0) {
+        vscode.window.showInformationMessage('No repositories are being tracked');
+        return;
+    }
+
+    // Use TrackedRepo.hook_installed directly instead of parsing hooks status
+    const installedRepos = trackedRepos.filter(r => r.hook_installed);
+    const notInstalledRepos = trackedRepos.filter(r => !r.hook_installed);
+
+    // Build status message
+    const statusLines = [
+        `📊 Git Hook Status (${trackedRepos.length} repositories)`,
+        '',
+        `✓ Hooks Installed: ${installedRepos.length}`,
+        `○ Hooks Not Installed: ${notInstalledRepos.length}`,
+        '',
+        '---',
+        ''
+    ];
+
+    if (installedRepos.length > 0) {
+        statusLines.push('✓ Installed in:');
+        installedRepos.forEach(repo => {
+            statusLines.push(`  • ${repo.name}`);
+        });
+        statusLines.push('');
+    }
+
+    if (notInstalledRepos.length > 0) {
+        statusLines.push('○ Not installed in:');
+        notInstalledRepos.forEach(repo => {
+            statusLines.push(`  • ${repo.name}`);
+        });
+        statusLines.push('');
+    }
+
+    const statusMessage = statusLines.join('\n');
+
+    // Show in a new document
+    const doc = await vscode.workspace.openTextDocument({
+        content: statusMessage,
+        language: 'plaintext'
+    });
+    await vscode.window.showTextDocument(doc, { preview: true });
+
+    // Also offer actions
+    if (notInstalledRepos.length > 0) {
+        const action = await vscode.window.showInformationMessage(
+            `${installedRepos.length} repo(s) with hooks, ${notInstalledRepos.length} without`,
+            'Install Hooks',
+            'Close'
+        );
+
+        if (action === 'Install Hooks') {
+            await handleInstallHook();
+        }
+    } else {
+        vscode.window.showInformationMessage(
+            `All ${installedRepos.length} tracked repositories have hooks installed ✓`
+        );
+    }
+}
+
 async function handleInstallHook() {
     const trackedRepos = await cli.getTrackedRepos();
     
     if (trackedRepos.length === 0) {
         vscode.window.showWarningMessage('No repositories are being tracked');
         return;
+    }
+
+    // Use TrackedRepo.hook_installed directly
+    const reposWithHooks = trackedRepos.filter(r => r.hook_installed);
+    const reposWithoutHooks = trackedRepos.filter(r => !r.hook_installed);
+
+    // Show current status
+    if (reposWithoutHooks.length === 0 && reposWithHooks.length > 0) {
+        const action = await vscode.window.showInformationMessage(
+            `All ${reposWithHooks.length} tracked repository(ies) already have hooks installed`,
+            'Reinstall Anyway',
+            'Cancel'
+        );
+        
+        if (action !== 'Reinstall Anyway') {
+            return;
+        }
+    } else if (reposWithHooks.length > 0 && reposWithoutHooks.length > 0) {
+        vscode.window.showInformationMessage(
+            `${reposWithHooks.length} repo(s) with hooks installed, ${reposWithoutHooks.length} without`
+        );
     }
 
     const action = await vscode.window.showQuickPick(
@@ -290,18 +377,46 @@ async function handleInstallHook() {
 }
 
 async function handleRemoveHook() {
-    const hookStatus = await cli.getHookStatus();
-    const installedRepos = hookStatus.filter(h => h.installed);
+    const trackedRepos = await cli.getTrackedRepos();
     
-    if (installedRepos.length === 0) {
-        vscode.window.showInformationMessage('No git hooks are currently installed');
+    if (trackedRepos.length === 0) {
+        vscode.window.showInformationMessage('No repositories are being tracked');
         return;
     }
 
+    // Use TrackedRepo.hook_installed directly
+    const installedRepos = trackedRepos.filter(r => r.hook_installed);
+    const notInstalledRepos = trackedRepos.filter(r => !r.hook_installed);
+    
+    if (installedRepos.length === 0) {
+        vscode.window.showInformationMessage('No git hooks are currently installed in tracked repositories');
+        return;
+    }
+
+    // Show current status
+    if (notInstalledRepos.length > 0) {
+        vscode.window.showInformationMessage(
+            `${installedRepos.length} repo(s) with hooks installed, ${notInstalledRepos.length} without`
+        );
+    }
+
     const action = await vscode.window.showQuickPick(
-        ['Remove from all repos', 'Remove from current workspace'],
+        [
+            {
+                label: 'Remove from all repos',
+                description: `Remove hooks from ${installedRepos.length} repository(ies)`
+            },
+            {
+                label: 'Remove from current workspace',
+                description: 'Remove hook from the current workspace only'
+            },
+            {
+                label: 'Select specific repositories',
+                description: 'Choose which repositories to remove hooks from'
+            }
+        ],
         {
-            placeHolder: 'Where do you want to remove the git hook?'
+            placeHolder: 'How do you want to remove git hooks?'
         }
     );
 
@@ -310,10 +425,10 @@ async function handleRemoveHook() {
     }
 
     try {
-        if (action === 'Remove from all repos') {
+        if (action.label === 'Remove from all repos') {
             await cli.removeHook();
-            vscode.window.showInformationMessage('Git hooks removed successfully!');
-        } else {
+            vscode.window.showInformationMessage('Git hooks removed successfully from all repositories!');
+        } else if (action.label === 'Remove from current workspace') {
             const workspaceFolders = vscode.workspace.workspaceFolders;
             if (!workspaceFolders || workspaceFolders.length === 0) {
                 vscode.window.showErrorMessage('No workspace folder open');
@@ -321,6 +436,45 @@ async function handleRemoveHook() {
             }
             await cli.removeHook(workspaceFolders[0].uri.fsPath);
             vscode.window.showInformationMessage(`Git hook removed from ${workspaceFolders[0].name}!`);
+        } else if (action.label === 'Select specific repositories') {
+            // Let user select which repos to remove hooks from
+            const items = installedRepos.map(repo => ({
+                label: repo.name,
+                description: repo.path,
+                picked: false,
+                path: repo.path
+            }));
+
+            const selected = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Select repositories to remove hooks from (multi-select)',
+                canPickMany: true
+            });
+
+            if (!selected || selected.length === 0) {
+                return;
+            }
+
+            // Remove hooks one by one
+            let successCount = 0;
+            let failCount = 0;
+            
+            for (const repo of selected) {
+                try {
+                    await cli.removeHook(repo.path);
+                    successCount++;
+                } catch (error) {
+                    failCount++;
+                    outputChannel.appendError(`Failed to remove hook from ${repo.label}: ${error}`);
+                }
+            }
+
+            if (successCount > 0) {
+                vscode.window.showInformationMessage(
+                    `Removed hooks from ${successCount} repository(ies)${failCount > 0 ? `, ${failCount} failed` : ''}`
+                );
+            } else {
+                vscode.window.showErrorMessage('Failed to remove hooks from all selected repositories');
+            }
         }
         dashboard.refresh();
     } catch (error) {
@@ -641,28 +795,94 @@ async function handleConfigureLLM() {
     }
 }
 
-async function handleStandup() {
-    try {
-        const standup = await cli.getStandup();
-        if (standup) {
-            dashboard.show();
-            // The dashboard will auto-load standup data
-        }
-    } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        vscode.window.showErrorMessage(`Failed to get standup: ${errorMsg}`);
-    }
-}
+async function handleShowCommits() {
+    // Ask for days filter
+    const daysOptions = [
+        { label: 'Last 3 days (standup)', value: 3 },
+        { label: 'Last 7 days (week)', value: 7 },
+        { label: 'Last 14 days (sprint)', value: 14 },
+        { label: 'Last 30 days', value: 30 },
+        { label: 'Custom...', value: -1 }
+    ];
 
-async function handleWeek() {
+    const selected = await vscode.window.showQuickPick(
+        daysOptions.map(o => ({ label: o.label, days: o.value })),
+        { placeHolder: 'Select time range' }
+    );
+
+    if (!selected) {
+        return;
+    }
+
+    let days = selected.days;
+    if (days === -1) {
+        const customDays = await vscode.window.showInputBox({
+            prompt: 'Enter number of days',
+            placeHolder: '7',
+            validateInput: (value) => {
+                const num = parseInt(value, 10);
+                if (isNaN(num) || num < 1) {
+                    return 'Please enter a valid number';
+                }
+                return null;
+            }
+        });
+        if (!customDays) {
+            return;
+        }
+        days = parseInt(customDays, 10);
+    }
+
     try {
-        const week = await cli.getWeek();
-        if (week) {
-            dashboard.show();
+        const commits = await cli.getCommits({ days });
+        if (commits && commits.length > 0) {
+            // Show in a document
+            const lines = [
+                `📊 Commits (last ${days} days) — ${commits.length} total`,
+                '',
+                '---',
+                ''
+            ];
+
+            // Group by repo (CLI returns repo_name, not repoName)
+            const byRepo: Record<string, typeof commits> = {};
+            for (const commit of commits) {
+                const repo = commit.repo_name || commit.repoName || 'Unknown';
+                if (!byRepo[repo]) {
+                    byRepo[repo] = [];
+                }
+                byRepo[repo].push(commit);
+            }
+
+            for (const [repo, repoCommits] of Object.entries(byRepo)) {
+                lines.push(`${repo}:`);
+                for (const commit of repoCommits.slice(0, 10)) {
+                    const sha = commit.short_sha || commit.sha.substring(0, 7);
+                    const msg = commit.message.split('\n')[0].substring(0, 50);
+                    lines.push(`  ${sha}  ${msg}`);
+                }
+                if (repoCommits.length > 10) {
+                    lines.push(`  ... and ${repoCommits.length - 10} more`);
+                }
+                lines.push('');
+            }
+
+            lines.push('---');
+            lines.push('');
+            lines.push('To generate stories from these commits:');
+            lines.push(`  repr generate --days ${days} --local`);
+
+            const doc = await vscode.workspace.openTextDocument({
+                content: lines.join('\n'),
+                language: 'plaintext'
+            });
+            await vscode.window.showTextDocument(doc, { preview: true });
+        } else {
+            vscode.window.showInformationMessage(`No commits found in the last ${days} days`);
         }
     } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        vscode.window.showErrorMessage(`Failed to get week summary: ${errorMsg}`);
+        vscode.window.showErrorMessage(`Failed to get commits: ${errorMsg}`);
     }
 }
 

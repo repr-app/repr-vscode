@@ -37,15 +37,40 @@ Your resume updates itself as you work — and it's always shareable.
 
 Access these commands via the Command Palette (`Cmd+Shift+P` or `Ctrl+Shift+P`):
 
+#### Profile & Authentication
 - **Repr: Open Dashboard** - View your profile status, stories, and repositories
-- **Repr: Analyze Workspace** - Analyze commits in your workspace
-- **Repr: Push Profile** - Push your profile to repr.dev
-- **Repr: View Profile** - Open your profile in the editor
-- **Repr: Show Recent Stories** - View your recent commit stories
 - **Repr: Login** - Authenticate with repr.dev
 - **Repr: Logout** - Sign out
 - **Repr: Share Public Profile** - Copy your public profile URL
 - **Repr: Open Public Profile** - Open your profile in browser
+
+#### Repository Management
+- **Repr: Add Current Workspace** - Add current workspace to tracked repositories
+- **Repr: Add Repository** - Add a repository to track
+- **Repr: Remove Repository** - Remove a tracked repository
+- **Repr: List Tracked Repositories** - View all tracked repositories
+- **Repr: Sync Now** - Manually sync all tracked repositories
+
+#### Git Hooks
+- **Repr: Install Git Hook** - Install git hooks for automatic tracking
+  - Checks current installation status
+  - Install in all repos or current workspace
+  - Shows which repos already have hooks installed
+- **Repr: Check Git Hook Status** - View which repositories have hooks installed
+  - Shows detailed status for all tracked repositories
+  - Offers quick action to install missing hooks
+- **Repr: Remove Git Hook** - Remove git hooks from repositories
+  - Remove from all repos, current workspace, or select specific repos
+  - Shows current installation status before removal
+
+#### Stories & Analysis
+- **Repr: Show Recent Stories** - View your recent commit stories
+- **Repr: Show Recent Commits** (`Cmd+Shift+C` / `Ctrl+Shift+C`) - View commits with time filters
+  - Quick options: Last 3 days (standup), 7 days (week), 14 days (sprint), 30 days, or custom
+- **Repr: Generate Stories (Local)** (`Cmd+Shift+G` / `Ctrl+Shift+G`) - Generate stories using local LLM
+- **Repr: Export as Markdown** - Export your profile to markdown format
+
+#### Configuration
 - **Repr: Configure LLM** - Set up cloud or local LLM endpoint
 
 ### Status Bar
