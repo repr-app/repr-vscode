@@ -1,0 +1,28 @@
+# Source files
+src/**
+tsconfig.json
+.eslintrc.json
+
+# Development files
+.vscode/**
+.github/**
+*.vsix
+publish.sh
+node_modules/**
+
+# Build artifacts
+*.map
+
+# Git files
+.gitignore
+
+# Documentation (keep README.md)
+# README.md is included by default
+
+# NPM
+.npmrc
+package-lock.json
+
+# macOS
+.DS_Store
+
