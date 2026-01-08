@@ -1,0 +1,231 @@
+{
+  "name": "repr",
+  "displayName": "Repr",
+  "description": "Your resume updates itself as you work — and it's always shareable",
+  "version": "0.1.0",
+  "publisher": "repr",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "repr.openDashboard",
+        "title": "Repr: Open Dashboard"
+      },
+      {
+        "command": "repr.refreshDashboard",
+        "title": "Repr: Refresh Dashboard"
+      },
+      {
+        "command": "repr.sync",
+        "title": "Repr: Sync Now"
+      },
+      {
+        "command": "repr.addCurrentRepo",
+        "title": "Repr: Add Current Workspace"
+      },
+      {
+        "command": "repr.addRepo",
+        "title": "Repr: Add Repository"
+      },
+      {
+        "command": "repr.removeRepo",
+        "title": "Repr: Remove Repository"
+      },
+      {
+        "command": "repr.listRepos",
+        "title": "Repr: List Tracked Repositories"
+      },
+      {
+        "command": "repr.installHook",
+        "title": "Repr: Install Git Hook"
+      },
+      {
+        "command": "repr.removeHook",
+        "title": "Repr: Remove Git Hook"
+      },
+      {
+        "command": "repr.showStories",
+        "title": "Repr: Show Recent Stories"
+      },
+      {
+        "command": "repr.login",
+        "title": "Repr: Login"
+      },
+      {
+        "command": "repr.logout",
+        "title": "Repr: Logout"
+      },
+      {
+        "command": "repr.shareProfile",
+        "title": "Repr: Share Public Profile"
+      },
+      {
+        "command": "repr.openPublicProfile",
+        "title": "Repr: Open Public Profile"
+      },
+      {
+        "command": "repr.configureLLM",
+        "title": "Repr: Configure LLM"
+      },
+      {
+        "command": "repr.standup",
+        "title": "Repr: Standup (Last 3 Days)"
+      },
+      {
+        "command": "repr.week",
+        "title": "Repr: Week Review"
+      },
+      {
+        "command": "repr.generateLocal",
+        "title": "Repr: Generate Stories (Local)"
+      },
+      {
+        "command": "repr.exportMarkdown",
+        "title": "Repr: Export as Markdown"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "repr.openDashboard",
+        "key": "cmd+shift+r",
+        "mac": "cmd+shift+r",
+        "win": "ctrl+shift+r",
+        "linux": "ctrl+shift+r"
+      },
+      {
+        "command": "repr.standup",
+        "key": "cmd+shift+s",
+        "mac": "cmd+shift+s",
+        "win": "ctrl+shift+s",
+        "linux": "ctrl+shift+s"
+      },
+      {
+        "command": "repr.week",
+        "key": "cmd+shift+w",
+        "mac": "cmd+shift+w",
+        "win": "ctrl+shift+w",
+        "linux": "ctrl+shift+w"
+      },
+      {
+        "command": "repr.generateLocal",
+        "key": "cmd+shift+g",
+        "mac": "cmd+shift+g",
+        "win": "ctrl+shift+g",
+        "linux": "ctrl+shift+g"
+      }
+    ],
+    "configuration": {
+      "title": "Repr",
+      "properties": {
+        "repr.cli.path": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to repr CLI executable (leave empty for auto-detection)"
+        },
+        "repr.autoDetect.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically detect new commits"
+        },
+        "repr.autoDetect.intervalMinutes": {
+          "type": "number",
+          "default": 30,
+          "description": "Interval in minutes to check for new commits"
+        },
+        "repr.autoDetect.showNotification": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show notification when new commits are detected"
+        },
+        "repr.autoDetect.promptForNewRepos": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prompt to add workspace as tracked repository on first open"
+        },
+        "repr.dashboard.showOnStartup": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show dashboard on VS Code startup"
+        },
+        "repr.statusBar.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Repr status in status bar"
+        },
+        "repr.llm.provider": {
+          "type": "string",
+          "enum": ["cloud", "local"],
+          "default": "cloud",
+          "description": "LLM provider to use: cloud (repr.dev) or local endpoint"
+        },
+        "repr.llm.endpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Custom LLM endpoint URL (used when provider is 'local'). Example: http://localhost:11434"
+        },
+        "repr.llm.model": {
+          "type": "string",
+          "default": "",
+          "description": "LLM model name to use (optional, uses CLI default if empty)"
+        },
+        "repr.llm.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for local LLM endpoint (optional, if required by your endpoint)"
+        },
+        "repr.storyGeneration.batchSize": {
+          "type": "number",
+          "default": 10,
+          "description": "Number of commits to batch before suggesting story generation"
+        },
+        "repr.storyGeneration.autoGenerate": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically generate story when batch size is reached"
+        },
+        "repr.storyGeneration.template": {
+          "type": "string",
+          "enum": ["default", "technical", "business", "brief"],
+          "default": "default",
+          "description": "Story generation template style"
+        },
+        "repr.storyGeneration.customPrompt": {
+          "type": "string",
+          "default": "",
+          "description": "Custom prompt to append to story generation (optional)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^16.18.126",
+    "@types/vscode": "^1.74.0",
+    "@typescript-eslint/eslint-plugin": "^5.62.0",
+    "@typescript-eslint/parser": "^5.62.0",
+    "eslint": "^8.57.1",
+    "typescript": "^4.9.3"
+  },
+  "keywords": ["git", "resume", "profile", "career"],
+  "author": "Repr",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/repr/repr"
+  }
+}
