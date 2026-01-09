@@ -18,16 +18,26 @@ export interface ReprStatus {
 
 export interface ReprStory {
     id: string;
-    summary: string;
-    what_was_built?: string;
+    summary: string;  // One-line technical summary (clean, no markdown)
+    content?: string;  // Full markdown content
+    what_was_built?: string;  // Legacy field
     technologies: string[];
     repo_name: string;
+    repo_path?: string;
     commit_shas: string[];
     first_commit_at: string;
     last_commit_at: string;
     files_changed: number;
     lines_added: number;
     lines_removed: number;
+    template?: string;  // resume, changelog, narrative, interview
+    generated_locally?: boolean;
+    needs_review?: boolean;
+    is_hidden?: boolean;
+    is_featured?: boolean;
+    client_id?: string;  // ULID from CLI local storage
+    created_at?: string;
+    updated_at?: string;
 }
 
 export interface ReprProfile {
@@ -95,12 +105,15 @@ export interface CommitInfo {
 
 export interface GeneratedStory {
     id: string;
-    summary: string;
+    summary: string;  // One-line technical summary
+    content?: string;  // Full markdown content
     technologies: string[];
     commit_shas: string[];
     files_changed: number;
     lines_added: number;
     lines_removed: number;
+    template?: string;
+    repo_name?: string;
 }
 
 export interface ModeInfo {
@@ -109,6 +122,59 @@ export interface ModeInfo {
     llm_provider: string;
     network_policy?: string;
     authenticated: boolean;
+}
+
+export interface ReprConfigFull {
+    version: number;
+    auth: any;
+    profile: {
+        username?: string;
+        claimed: boolean;
+        bio?: string;
+        location?: string;
+        website?: string;
+        twitter?: string;
+        linkedin?: string;
+        available: boolean;
+    };
+    settings: {
+        default_paths: string[];
+        skip_patterns: string[];
+    };
+    llm: {
+        default: string;
+        local_provider?: string;
+        local_api_url?: string;
+        local_api_key?: string;
+        local_model?: string;
+        extraction_model?: string;
+        synthesis_model?: string;
+        cloud_model: string;
+        cloud_send_diffs: boolean;
+        cloud_redact_paths: boolean;
+        cloud_redact_emails: boolean;
+        cloud_redact_patterns: string[];
+        cloud_allowlist_repos: string[];
+        byok: Record<string, any>;
+    };
+    generation: {
+        batch_size: number;
+        auto_generate_on_hook: boolean;
+        default_template: string;
+        token_limit: number;
+        max_commits_per_batch: number;
+    };
+    publish: {
+        on_generate: string;
+        on_sync: string;
+    };
+    privacy: {
+        lock_local_only: boolean;
+        lock_permanent: boolean;
+        profile_visibility: string;
+        telemetry_enabled: boolean;
+    };
+    tracked_repos: any[];
 }
 
 export class ReprCLI {
@@ -213,6 +279,26 @@ export class ReprCLI {
         } catch (error) {
             this.outputChannel.appendError(`Failed to get config: ${error}`);
             return null;
+        }
+    }
+
+    async getFullConfig(): Promise<ReprConfigFull | null> {
+        try {
+            const { stdout } = await this.execCommand('config show --json');
+            return JSON.parse(stdout);
+        } catch (error) {
+            this.outputChannel.appendError(`Failed to get full config: ${error}`);
+            return null;
+        }
+    }
+
+    async setConfigValue(key: string, value: string | number | boolean): Promise<boolean> {
+        try {
+            await this.execCommand(`config set ${key} ${value}`);
+            return true;
+        } catch (error) {
+            this.outputChannel.appendError(`Failed to set config ${key}: ${error}`);
+            return false;
         }
     }
 

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ReprCLI, ReprStory, ReprStatus, TrackedRepo, HookStatus, CommitInfo, ModeInfo } from './cli';
+import { ReprCLI, ReprStory, ReprStatus, TrackedRepo, HookStatus, CommitInfo, ModeInfo, ReprConfigFull } from './cli';
 import { ReprOutputChannel } from './outputChannel';
 
 export class ReprDashboard {
@@ -112,16 +112,17 @@ export class ReprDashboard {
                 ]);
             };
 
-            const [status, mode, trackedRepos, hookStatus, storiesData] = await Promise.all([
+            const [status, mode, trackedRepos, hookStatus, storiesData, config] = await Promise.all([
                 timeout(this.cli.getStatus(), 10000),
                 timeout(this.cli.getMode(), 10000),
                 timeout(this.cli.getTrackedRepos(), 10000),
                 timeout(this.cli.getHookStatus(), 10000),
-                timeout(this.cli.getStories({ limit: 100 }), 10000)
+                timeout(this.cli.getStories({ limit: 100 }), 10000),
+                timeout(this.cli.getFullConfig(), 10000)
             ]);
 
             const actualStoriesCount = storiesData?.stories?.length || storiesData?.total || 0;
-            const html = this.getHtmlContent(status, mode, trackedRepos || [], hookStatus || [], actualStoriesCount);
+            const html = this.getHtmlContent(status, mode, trackedRepos || [], hookStatus || [], actualStoriesCount, config);
             this.panel.webview.html = html;
         } catch (error) {
             this.outputChannel.appendError(`Dashboard refresh failed: ${error}`);
@@ -603,6 +604,37 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
                     vscode.window.showInformationMessage(message);
                 }
                 break;
+
+            case 'loadConfig':
+                try {
+                    const fullConfig = await this.cli.getFullConfig();
+                    this.panel?.webview.postMessage({
+                        command: 'updateConfig',
+                        config: fullConfig
+                    });
+                } catch (error) {
+                    this.outputChannel.appendError(`Failed to load config: ${error}`);
+                }
+                break;
+
+            case 'setConfig':
+                try {
+                    const success = await this.cli.setConfigValue(message.key, message.value);
+                    if (success) {
+                        vscode.window.showInformationMessage(`Updated ${message.key}`);
+                        // Reload config to reflect changes
+                        const updatedConfig = await this.cli.getFullConfig();
+                        this.panel?.webview.postMessage({
+                            command: 'updateConfig',
+                            config: updatedConfig
+                        });
+                    } else {
+                        vscode.window.showErrorMessage(`Failed to update ${message.key}`);
+                    }
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Failed to update config: ${error}`);
+                }
+                break;
         }
     }
 
@@ -611,7 +643,8 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
         mode: ModeInfo | null,
         trackedRepos: TrackedRepo[],
         hookStatus: HookStatus[],
-        storiesCount: number = 0
+        storiesCount: number = 0,
+        config: ReprConfigFull | null = null
     ): string {
         const isAuthenticated = status?.authenticated || false;
         const modeDisplay = mode?.mode || 'UNKNOWN';
@@ -1278,14 +1311,105 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
             border-color: var(--vscode-focusBorder);
         }
 
-        .loading {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 40px;
-            color: var(--vscode-descriptionForeground);
-        }
-    </style>
+                        .loading {
+                            display: flex;
+                            flex-direction: column;
+                            align-items: center;
+                            padding: 40px;
+                            color: var(--vscode-descriptionForeground);
+                        }
+
+                        /* --- Settings --- */
+                        .settings-group {
+                            background-color: var(--vscode-editor-background);
+                            border: 1px solid var(--vscode-widget-border);
+                            border-radius: 4px;
+                            overflow: hidden;
+                        }
+
+                        .setting-item {
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            padding: 12px 16px;
+                            border-bottom: 1px solid var(--vscode-widget-border);
+                        }
+
+                        .setting-item:last-child {
+                            border-bottom: none;
+                        }
+
+                        .setting-label {
+                            display: flex;
+                            flex-direction: column;
+                            gap: 2px;
+                        }
+
+                        .setting-name {
+                            font-size: 13px;
+                            font-weight: 500;
+                            color: var(--vscode-foreground);
+                        }
+
+                        .setting-desc {
+                            font-size: 11px;
+                            color: var(--vscode-descriptionForeground);
+                        }
+
+                        /* Toggle switch */
+                        .toggle {
+                            position: relative;
+                            display: inline-block;
+                            width: 40px;
+                            height: 22px;
+                            flex-shrink: 0;
+                        }
+
+                        .toggle input {
+                            opacity: 0;
+                            width: 0;
+                            height: 0;
+                        }
+
+                        .toggle-slider {
+                            position: absolute;
+                            cursor: pointer;
+                            top: 0;
+                            left: 0;
+                            right: 0;
+                            bottom: 0;
+                            background-color: var(--vscode-input-background);
+                            border: 1px solid var(--vscode-input-border);
+                            border-radius: 22px;
+                            transition: 0.2s;
+                        }
+
+                        .toggle-slider:before {
+                            position: absolute;
+                            content: "";
+                            height: 16px;
+                            width: 16px;
+                            left: 2px;
+                            bottom: 2px;
+                            background-color: var(--vscode-foreground);
+                            border-radius: 50%;
+                            transition: 0.2s;
+                        }
+
+                        .toggle input:checked + .toggle-slider {
+                            background-color: var(--vscode-button-background);
+                            border-color: var(--vscode-button-background);
+                        }
+
+                        .toggle input:checked + .toggle-slider:before {
+                            transform: translateX(18px);
+                            background-color: var(--vscode-button-foreground);
+                        }
+
+                        .toggle input:focus + .toggle-slider {
+                            box-shadow: 0 0 0 2px var(--vscode-focusBorder);
+                        }
+                    </style>
 </head>
 <body>
     <div class="container">
@@ -1328,11 +1452,12 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
             <!-- Main Content -->
             <div class="main-content">
                 <div class="tabs">
-                    <div class="tab active" data-tab="recent" onclick="switchTab('recent')">Dashboard</div>
-                    <div class="tab" data-tab="commits" onclick="switchTab('commits')">All Commits</div>
-                    <div class="tab" data-tab="stories" onclick="switchTab('stories')">All Stories</div>
-                    <div class="tab" data-tab="generate" onclick="switchTab('generate')">Generate Stories</div>
-                </div>
+                                    <div class="tab active" data-tab="recent" onclick="switchTab('recent')">Dashboard</div>
+                                    <div class="tab" data-tab="commits" onclick="switchTab('commits')">All Commits</div>
+                                    <div class="tab" data-tab="stories" onclick="switchTab('stories')">All Stories</div>
+                                    <div class="tab" data-tab="generate" onclick="switchTab('generate')">Generate Stories</div>
+                                    <div class="tab" data-tab="settings" onclick="switchTab('settings')">Settings</div>
+                                </div>
 
                 <!-- Tab: Recent Stories -->
                 <div class="tab-content active" id="tab-recent">
@@ -1455,6 +1580,168 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
                         </button>
                     </div>
                 </div>
+
+                <!-- Tab: Settings -->
+                <div class="tab-content" id="tab-settings">
+                    <div class="work-section">
+                        <div class="section-header">
+                            <h3 class="section-title">Generation Settings</h3>
+                        </div>
+                        <div class="settings-group">
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Auto-generate on hook</span>
+                                    <span class="setting-desc">Automatically generate stories when commit queue meets batch size</span>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" id="setting-auto-generate" ${config?.generation?.auto_generate_on_hook ? 'checked' : ''} onchange="updateSetting('generation.auto_generate_on_hook', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Batch size</span>
+                                    <span class="setting-desc">Number of commits per generated story</span>
+                                </div>
+                                <input type="number" id="setting-batch-size" value="${config?.generation?.batch_size || 5}" min="1" max="50" style="width: 80px; margin-bottom: 0;" onchange="updateSetting('generation.batch_size', parseInt(this.value))">
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Default template</span>
+                                    <span class="setting-desc">Template to use for story generation</span>
+                                </div>
+                                <select id="setting-default-template" style="width: 150px; margin-bottom: 0;" onchange="updateSetting('generation.default_template', this.value)">
+                                    <option value="resume" ${config?.generation?.default_template === 'resume' ? 'selected' : ''}>Resume</option>
+                                    <option value="changelog" ${config?.generation?.default_template === 'changelog' ? 'selected' : ''}>Changelog</option>
+                                    <option value="interview" ${config?.generation?.default_template === 'interview' ? 'selected' : ''}>Interview</option>
+                                    <option value="narrative" ${config?.generation?.default_template === 'narrative' ? 'selected' : ''}>Narrative</option>
+                                </select>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Max commits per batch</span>
+                                    <span class="setting-desc">Maximum commits to process in one request</span>
+                                </div>
+                                <input type="number" id="setting-max-commits" value="${config?.generation?.max_commits_per_batch || 50}" min="10" max="200" style="width: 80px; margin-bottom: 0;" onchange="updateSetting('generation.max_commits_per_batch', parseInt(this.value))">
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Token limit</span>
+                                    <span class="setting-desc">Maximum tokens per cloud request</span>
+                                </div>
+                                <input type="number" id="setting-token-limit" value="${config?.generation?.token_limit || 100000}" min="10000" max="500000" step="10000" style="width: 100px; margin-bottom: 0;" onchange="updateSetting('generation.token_limit', parseInt(this.value))">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="work-section">
+                        <div class="section-header">
+                            <h3 class="section-title">LLM Settings</h3>
+                        </div>
+                        <div class="settings-group">
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Default LLM</span>
+                                    <span class="setting-desc">Default LLM provider for generation</span>
+                                </div>
+                                <select id="setting-llm-default" style="width: 150px; margin-bottom: 0;" onchange="updateSetting('llm.default', this.value)">
+                                    <option value="local" ${config?.llm?.default === 'local' ? 'selected' : ''}>Local</option>
+                                    <option value="cloud" ${config?.llm?.default === 'cloud' ? 'selected' : ''}>Cloud</option>
+                                </select>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Local API URL</span>
+                                    <span class="setting-desc">URL for local LLM (e.g., Ollama)</span>
+                                </div>
+                                <input type="text" id="setting-local-api-url" value="${config?.llm?.local_api_url || ''}" placeholder="http://localhost:11434/v1" style="width: 250px; margin-bottom: 0;" onchange="updateSetting('llm.local_api_url', this.value)">
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Local model</span>
+                                    <span class="setting-desc">Model name for local LLM</span>
+                                </div>
+                                <input type="text" id="setting-local-model" value="${config?.llm?.local_model || ''}" placeholder="llama3.2" style="width: 150px; margin-bottom: 0;" onchange="updateSetting('llm.local_model', this.value)">
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Cloud model</span>
+                                    <span class="setting-desc">Model for cloud generation</span>
+                                </div>
+                                <input type="text" id="setting-cloud-model" value="${config?.llm?.cloud_model || 'gpt-4o-mini'}" style="width: 150px; margin-bottom: 0;" onchange="updateSetting('llm.cloud_model', this.value)">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="work-section">
+                        <div class="section-header">
+                            <h3 class="section-title">Privacy Settings</h3>
+                        </div>
+                        <div class="settings-group">
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Local only mode</span>
+                                    <span class="setting-desc">Disable all cloud features</span>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" id="setting-local-only" ${config?.privacy?.lock_local_only ? 'checked' : ''} onchange="updateSetting('privacy.lock_local_only', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Send diffs to cloud</span>
+                                    <span class="setting-desc">Include code diffs in cloud requests</span>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" id="setting-send-diffs" ${config?.llm?.cloud_send_diffs ? 'checked' : ''} onchange="updateSetting('llm.cloud_send_diffs', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Redact paths</span>
+                                    <span class="setting-desc">Remove absolute paths from cloud requests</span>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" id="setting-redact-paths" ${config?.llm?.cloud_redact_paths ? 'checked' : ''} onchange="updateSetting('llm.cloud_redact_paths', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Redact emails</span>
+                                    <span class="setting-desc">Remove author emails from cloud requests</span>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" id="setting-redact-emails" ${config?.llm?.cloud_redact_emails ? 'checked' : ''} onchange="updateSetting('llm.cloud_redact_emails', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Telemetry</span>
+                                    <span class="setting-desc">Opt-in anonymous usage statistics</span>
+                                </div>
+                                <label class="toggle">
+                                    <input type="checkbox" id="setting-telemetry" ${config?.privacy?.telemetry_enabled ? 'checked' : ''} onchange="updateSetting('privacy.telemetry_enabled', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="setting-item">
+                                <div class="setting-label">
+                                    <span class="setting-name">Profile visibility</span>
+                                    <span class="setting-desc">Who can see your published profile</span>
+                                </div>
+                                <select id="setting-visibility" style="width: 150px; margin-bottom: 0;" onchange="updateSetting('privacy.profile_visibility', this.value)">
+                                    <option value="public" ${config?.privacy?.profile_visibility === 'public' ? 'selected' : ''}>Public</option>
+                                    <option value="unlisted" ${config?.privacy?.profile_visibility === 'unlisted' ? 'selected' : ''}>Unlisted</option>
+                                    <option value="private" ${config?.privacy?.profile_visibility === 'private' ? 'selected' : ''}>Private</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Sidebar -->
@@ -1523,6 +1810,15 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
         function sendMessage(command, data) {
             data = data || {};
             vscode.postMessage(Object.assign({ command: command }, data));
+        }
+
+        // Settings functions
+        function updateSetting(key, value) {
+            sendMessage('setConfig', { key: key, value: value });
+        }
+
+        function loadSettings() {
+            sendMessage('loadConfig');
         }
 
         // Commit selection functions
@@ -1702,6 +1998,8 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
             } else if (tabName === 'commits') {
                 var days = parseInt(document.getElementById('commits-time-range').value, 10) || 30;
                 loadAllCommits(days);
+            } else if (tabName === 'settings') {
+                loadSettings();
             }
         }
 
@@ -2188,8 +2486,94 @@ Authenticated: ${modeInfo.authenticated ? 'Yes' : 'No'}
                 case 'switchTab':
                     switchTab(message.tab);
                     break;
+                case 'updateConfig':
+                    console.log('updateConfig received:', message.config);
+                    updateSettingsUI(message.config);
+                    break;
             }
         });
+
+        function updateSettingsUI(config) {
+            if (!config) return;
+            
+            // Generation settings
+            var autoGenEl = document.getElementById('setting-auto-generate');
+            if (autoGenEl && config.generation) {
+                autoGenEl.checked = config.generation.auto_generate_on_hook || false;
+            }
+            
+            var batchSizeEl = document.getElementById('setting-batch-size');
+            if (batchSizeEl && config.generation) {
+                batchSizeEl.value = config.generation.batch_size || 5;
+            }
+            
+            var templateEl = document.getElementById('setting-default-template');
+            if (templateEl && config.generation) {
+                templateEl.value = config.generation.default_template || 'resume';
+            }
+            
+            var maxCommitsEl = document.getElementById('setting-max-commits');
+            if (maxCommitsEl && config.generation) {
+                maxCommitsEl.value = config.generation.max_commits_per_batch || 50;
+            }
+            
+            var tokenLimitEl = document.getElementById('setting-token-limit');
+            if (tokenLimitEl && config.generation) {
+                tokenLimitEl.value = config.generation.token_limit || 100000;
+            }
+            
+            // LLM settings
+            var llmDefaultEl = document.getElementById('setting-llm-default');
+            if (llmDefaultEl && config.llm) {
+                llmDefaultEl.value = config.llm.default || 'local';
+            }
+            
+            var localApiUrlEl = document.getElementById('setting-local-api-url');
+            if (localApiUrlEl && config.llm) {
+                localApiUrlEl.value = config.llm.local_api_url || '';
+            }
+            
+            var localModelEl = document.getElementById('setting-local-model');
+            if (localModelEl && config.llm) {
+                localModelEl.value = config.llm.local_model || '';
+            }
+            
+            var cloudModelEl = document.getElementById('setting-cloud-model');
+            if (cloudModelEl && config.llm) {
+                cloudModelEl.value = config.llm.cloud_model || 'gpt-4o-mini';
+            }
+            
+            // Privacy settings
+            var localOnlyEl = document.getElementById('setting-local-only');
+            if (localOnlyEl && config.privacy) {
+                localOnlyEl.checked = config.privacy.lock_local_only || false;
+            }
+            
+            var sendDiffsEl = document.getElementById('setting-send-diffs');
+            if (sendDiffsEl && config.llm) {
+                sendDiffsEl.checked = config.llm.cloud_send_diffs || false;
+            }
+            
+            var redactPathsEl = document.getElementById('setting-redact-paths');
+            if (redactPathsEl && config.llm) {
+                redactPathsEl.checked = config.llm.cloud_redact_paths !== false;
+            }
+            
+            var redactEmailsEl = document.getElementById('setting-redact-emails');
+            if (redactEmailsEl && config.llm) {
+                redactEmailsEl.checked = config.llm.cloud_redact_emails || false;
+            }
+            
+            var telemetryEl = document.getElementById('setting-telemetry');
+            if (telemetryEl && config.privacy) {
+                telemetryEl.checked = config.privacy.telemetry_enabled || false;
+            }
+            
+            var visibilityEl = document.getElementById('setting-visibility');
+            if (visibilityEl && config.privacy) {
+                visibilityEl.value = config.privacy.profile_visibility || 'public';
+            }
+        }
 
         function renderStories(stories) {
             var container = document.getElementById('stories-list');
