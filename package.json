@@ -2,7 +2,7 @@
   "name": "repr",
   "displayName": "Repr",
   "description": "Transform your commits into stories that showcase your work",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "homepage": "https://repr.dev",
   "bugs": {
     "url": "https://github.com/repr-app/repr-vscode/issues"
@@ -161,7 +161,10 @@
         },
         "repr.llm.provider": {
           "type": "string",
-          "enum": ["cloud", "local"],
+          "enum": [
+            "cloud",
+            "local"
+          ],
           "default": "cloud",
           "description": "LLM provider to use: cloud (repr.dev) or local endpoint"
         },
@@ -192,7 +195,12 @@
         },
         "repr.storyGeneration.template": {
           "type": "string",
-          "enum": ["default", "technical", "business", "brief"],
+          "enum": [
+            "default",
+            "technical",
+            "business",
+            "brief"
+          ],
           "default": "default",
           "description": "Story generation template style"
         },
@@ -219,7 +227,12 @@
     "eslint": "^8.57.1",
     "typescript": "^4.9.3"
   },
-  "keywords": ["git", "resume", "profile", "career"],
+  "keywords": [
+    "git",
+    "resume",
+    "profile",
+    "career"
+  ],
   "author": "Repr",
   "license": "MIT",
   "repository": {
