@@ -2,7 +2,7 @@
   "name": "repr",
   "displayName": "Repr",
   "description": "Transform your commits into stories that showcase your work",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "homepage": "https://repr.dev",
   "bugs": {
     "url": "https://github.com/repr-app/repr-vscode/issues"
@@ -190,7 +190,7 @@
         },
         "repr.storyGeneration.autoGenerate": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Automatically generate story when batch size is reached"
         },
         "repr.storyGeneration.template": {
